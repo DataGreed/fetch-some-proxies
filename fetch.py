@@ -61,6 +61,7 @@ PROXY_LIST_URL = "https://raw.githubusercontent.com/stamparm/aux/master/fetch-so
 ROTATION_CHARS = ('/', '-', '\\', '|')
 TIMEOUT = 10
 THREADS = 20
+MAX_PROXIES = 15
 USER_AGENT = "curl/7.{curl_minor}.{curl_revision} (x86_64-pc-linux-gnu) libcurl/7.{curl_minor}.{curl_revision} OpenSSL/0.9.8{openssl_revision} zlib/1.2.{zlib_revision}".format(curl_minor=random.randint(8, 22), curl_revision=random.randint(1, 9), openssl_revision=random.choice(string.ascii_lowercase), zlib_revision=random.randint(2, 6))
 
 if not IS_WIN:
@@ -101,7 +102,7 @@ def retrieve(url, data=None, headers={"User-agent": USER_AGENT}, timeout=timeout
 
     return (retval or "").decode("utf8")
 
-def worker(queue, handle=None):
+def worker(queue, resulting_proxies, handle=None):
     try:
         while True:
             proxy = queue.get_nowait()
@@ -126,6 +127,9 @@ def worker(queue, handle=None):
                 if latency < timeout:
                     sys.stdout.write("\r%s%s # latency: %.2f sec; country: %s; anonymity: %s (%s)\n" % (candidate, " " * (32 - len(candidate)), latency, ' '.join(_.capitalize() for _ in (proxy["country"].lower() or '-').split(' ')), proxy["type"], proxy["anonymity"]))
                     sys.stdout.flush()
+
+                    resulting_proxies.append(candidate)
+
                     if handle:
                         os.write(handle, ("%s%s" % (candidate, os.linesep)).encode("utf8"))
     except:
@@ -142,6 +146,8 @@ def random_ifconfig():
 def run():
     global FALLBACK_METHOD
     global timeout
+
+    resulting_proxies = []
 
     sys.stdout.write("[i] initial testing...\n")
 
@@ -193,7 +199,7 @@ def run():
 
     sys.stdout.write("[i] testing %d proxies (%d threads)...\n\n" % (len(proxies) if not FALLBACK_METHOD else sum(proxy["proto"] in ("http", "https") for proxy in proxies), options.threads or THREADS))
     for _ in xrange(options.threads or THREADS):
-        thread = threading.Thread(target=worker, args=[queue, handle])
+        thread = threading.Thread(target=worker, args=[queue, resulting_proxies, handle])
         thread.daemon = True
 
         try:
@@ -221,7 +227,9 @@ def run():
         sys.stderr.flush()
         if handle:
             os.close(handle)
-        os._exit(0)
+        # os._exit(0)
+
+    return resulting_proxies
 
 def main():
     global options
@@ -251,6 +259,8 @@ def main():
     parser.add_option("--threads", dest="threads", type=int, help="Number of scanning threads (default %d)" % THREADS)
     parser.add_option("--timeout", dest="timeout", type=int, help="Request timeout in seconds (default %d)" % TIMEOUT)
     parser.add_option("--type", dest="type", help="Regex for filtering proxy type (e.g. \"http\")")
+    parser.add_option("--max-proxies", dest="maxProxies", help="Maximum number of proxies to get (default %d)" % MAX_PROXIES)
+
 
     # Dirty hack(s) for help message
     def _(self, *args):
